@@ -1,6 +1,9 @@
 # SRL's nodes
 
-This is a collection of nodes I find useful.
+This is a collection of nodes I find useful. Note that at least one
+module allows execution of arbitrary code. Do not use any of these
+nodes on a system that allow untrusted users to control workflows or
+inputs.
 
 # Nodes
 
@@ -22,7 +25,8 @@ positional and named argument syntax.
 
 ![Screenshot of SrlEval](screenshots/SrlEval.png)
 
-Evaluate arbitrary Python code as a function. Code is evaluated as:
+Evaluate arbitrary Python code as a function. Do not use on a system
+accessible by untrusted users. Code is evaluated as:
 
 ```
 def func({parameters}):
@@ -44,3 +48,8 @@ All code in this repository is copyright Sean Richard Lynch and any
 other srl-nodes authors and released under the AGPLv3 unless otherwise
 specified. Please see [LICENSE.txt](LICENSE.txt) for the full text of
 the license.
+
+# Warranty
+
+This code comes with no warranty of any kind. It may destroy your
+computer. If it does, you get to keep the pieces.
