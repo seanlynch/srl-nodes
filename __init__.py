@@ -73,8 +73,16 @@ class SrlEval:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "parameters": ("STRING", {"multiline": False, "default": "a, b=None, c=\"foo\", *rest"}),
-                "code": ("STRING", {"multiline": True, "default": "code goes here\nreturn a + b"}),
+                "parameters": ("STRING", {
+                    "multiline": False,
+                    "default": "a, b=None, c=\"foo\", *rest",
+                    "dynamicPrompts": False,
+                }),
+                "code": ("STRING", {
+                    "multiline": True,
+                    "default": "code goes here\nreturn a + b",
+                    "dynamicPrompts": False,
+                }),
             },
             "optional": {
                 "arg0": (any_typ,),
