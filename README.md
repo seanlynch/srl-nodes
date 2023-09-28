@@ -24,7 +24,6 @@ positional and named argument syntax.
 
 Evaluate arbitrary Python code as a function. Code is evaluated as:
 
-
 ```
 def func({parameters}):
     code\_line1
@@ -38,3 +37,10 @@ modules. I don't have any intention to try to make it secure because
 ComfyUI itself isn't remotely secure, but I will probably try to
 improve isolation at some point in the future to prevent unintended
 problems. PRs gladly accepted if you have need for this.
+
+# License
+
+All code in this repository is copyright Sean Richard Lynch and any
+other srl-nodes authors and released under the AGPLv3 unless otherwise
+specified. Please see [LICENSE.txt](LICENSE.txt) for the full text of
+the license.
