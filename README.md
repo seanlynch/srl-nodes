@@ -42,6 +42,13 @@ ComfyUI itself isn't remotely secure, but I will probably try to
 improve isolation at some point in the future to prevent unintended
 problems. PRs gladly accepted if you have need for this.
 
+## SRL Filter Image List
+
+![Screenshot of SrlFilterImageList](screenshots/SrlFilterImageList.png)
+
+Takes a list of images and a list of bools as input and outputs a list
+of the input images where the bool is true.
+
 # License
 
 All code in this repository is copyright Sean Richard Lynch and any

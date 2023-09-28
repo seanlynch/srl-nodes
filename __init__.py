@@ -132,12 +132,34 @@ class SrlEval:
         return (ret,)
 
 
+class SrlFilterImageList:
+    """Filter an image list based on a list of bools"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "keep": ("BOOLEAN", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    INPUT_IS_LIST = True
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "doit"
+
+    def doit(self, images, keep):
+        return ([im for im, k in zip(images, keep) if k],)
+
+
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
     "SRL Conditional Interrrupt": SrlConditionalInterrupt,
     "SRL Format String": SrlFormatString,
     "SRL Eval": SrlEval,
+    "SRL Filter Image List": SrlFilterImageList,
 }
 
 
@@ -146,4 +168,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SrlConditionalInterrupt": "SRL Conditional Interrupt",
     "SrlFormatString": "SRL Format String",
     "SrlEval": "SRL Eval",
+    "SrlFilterImageList": "SRL Filter Image List",
 }
