@@ -25,10 +25,11 @@ positional and named argument syntax.
 Evaluate arbitrary Python code as a function. Code is evaluated as:
 
 
-```def func({parameters}):
-       code\_line1
-	   code\_line2
-	   ...
+```
+def func({parameters}):
+    code\_line1
+    code\_line2
+    ...
 ```
 
 Right now this uses the globals dictionary from the module, so be
