@@ -46,8 +46,9 @@ problems. PRs gladly accepted if you have need for this.
 
 ![Screenshot of SrlFilterImageList](screenshots/SrlFilterImageList.png)
 
-Takes a list of images and a list of bools as input and outputs a list
-of the input images where the bool is true.
+Takes a list of images and a list of bools as input and outputs two
+image lists, one where the bool is true and the other where it's
+false.
 
 # License
 

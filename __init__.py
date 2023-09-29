@@ -66,70 +66,32 @@ class SrlFormatString:
         return (format.format(*kwargs.values(), **kwargs),)
 
 
-class SrlEval:
-    """Evaluate any Python code as a function with the given inputs."""
+class SrlNumExpr:
+    """Evaluate a numerical expression safely."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "parameters": ("STRING", {
-                    "multiline": False,
-                    "default": "a, b=None, c=\"foo\", *rest",
-                    "dynamicPrompts": False,
-                }),
-                "code": ("STRING", {
-                    "multiline": True,
-                    "default": "code goes here\nreturn a + b",
-                    "dynamicPrompts": False,
-                }),
+                "expr": ("STRING", {"multiline": True}),
             },
             "optional": {
-                "arg0": (any_typ,),
-                "arg1": (any_typ,),
-                "arg2": (any_typ,),
-                "arg3": (any_typ,),
-                "arg4": (any_typ,),
-            }
+                "b0": ("BOOLEAN", {"forceInput": True}),
+                "b1": ("BOOLEAN", {"forceInput": True}),
+                "b2": ("BOOLEAN", {"forceInput": True}),
+                "i0": ("INT", {"forceInput": True}),
+                "i1": ("INT", {"forceInput": True}),
+                "i2": ("INT", {"forceInput": True}),
+                "f0": ("FLOAT", {"forceInput": True}),
+                "f1": ("FLOAT", {"forceInput": True}),
+                "f2": ("FLOAT", {"forceInput": True}),
+            },
         }
 
-    RETURN_TYPES = (any_typ,)
-    FUNCTION = "doit"
-    CATEGORY = "utils"
+    RETURN_TYPES = ("BOOL", "INT", "FLOAT")
 
-    def doit(self, parameters, code, **kw):
-        # Indent the code for the main body of the function
-        func_code = textwrap.indent(code, "    ")
-        source = f"def func({parameters}):\n{func_code}"
-
-        # The provided code can mutate globals or really do anything, but ComfyUI isn't secure to begin with.
-        loc = {}
-        exec(source, globals(), loc)
-        func = loc["func"]
-
-        argspec = inspect.getfullargspec(func)
-        # We don't allow variable keyword arguments or keyword only arguments, but we do allow varargs
-        assert argspec.varkw is None
-        assert not argspec.kwonlyargs
-
-        input_names = list(self.INPUT_TYPES()["optional"].keys())
-        parameter_names = argspec.args
-
-        # Convert the list of defaults into a dictionary to make it easier to use
-        default_list = argspec.defaults if argspec.defaults is not None else []
-        defaults = {parameter_name: default for parameter_name, default in zip(parameter_names[-len(default_list):], default_list)}
-
-        # We handle substituting default values ourselves in order to support *args
-        args = [kw[input_name] if input_name in kw else defaults[parameter_name] for parameter_name, input_name in zip(parameter_names, input_names)]
-
-        # Support *args
-        if argspec.varargs is not None:
-            unnamed_inputs = input_names[len(argspec.args):]
-            # I considered requiring the remaining inputs to be contiguous, but I don't think it's helpful.
-            args += [kw[input_name] for input_name in unnamed_inputs if input_name in kw]
-
-        ret = func(*args)
-        return (ret,)
+    def doit(self, expr, **kwargs):
+        pass
 
 
 class SrlFilterImageList:
@@ -144,13 +106,43 @@ class SrlFilterImageList:
             }
         }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("t_images", "f_images")
     INPUT_IS_LIST = True
-    OUTPUT_IS_LIST = (True,)
+    OUTPUT_IS_LIST = (True, True)
     FUNCTION = "doit"
 
     def doit(self, images, keep):
-        return ([im for im, k in zip(images, keep) if k],)
+        im1, im2 = itertools.tee(zip(images, keep))
+        return (
+            [im for im, k in im1 if k],
+            [im for im, k in im2 if not k],
+        )
+
+
+class SrlCountSegs:
+    """Count the number of segs."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "segs": ("SEGS",),
+                "ignore_none": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("INT",)
+    FUNCTION = "doit"
+
+    def doit(self, segs, ignore_none):
+        if segs is None:
+            if ignore_none:
+                raise TypeError("segs is None, expected SEGS")
+            else:
+                return 0
+        else:
+            return len(segs[1])
 
 
 # A dictionary that contains all nodes you want to export with their names
@@ -158,8 +150,8 @@ class SrlFilterImageList:
 NODE_CLASS_MAPPINGS = {
     "SRL Conditional Interrrupt": SrlConditionalInterrupt,
     "SRL Format String": SrlFormatString,
-    "SRL Eval": SrlEval,
     "SRL Filter Image List": SrlFilterImageList,
+    "SRL Count SEGS": SrlCountSegs,
 }
 
 
@@ -167,6 +159,6 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SrlConditionalInterrupt": "SRL Conditional Interrupt",
     "SrlFormatString": "SRL Format String",
-    "SrlEval": "SRL Eval",
     "SrlFilterImageList": "SRL Filter Image List",
+    "SrlCountSegs": "SRL Count SEGS",
 }
