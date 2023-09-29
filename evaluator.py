@@ -298,8 +298,8 @@ class Visitor(ast.NodeVisitor):
         self.stack.append(set(self.generate(node)))
 
     def visit_Slice(self, node):
-        lower = self.evaluate(node.lower)
-        upper = self.evaluate(node.upper)
+        lower = None if node.lower is None else self.evaluate(node.lower)
+        upper = None if node.upper is None else self.evaluate(node.upper)
         step = None if node.step is None else self.evaluate(node.step)
         self.stack.append(slice(lower, upper, step))
 
