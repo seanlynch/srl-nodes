@@ -5,7 +5,7 @@ from evaluator import evaluate, safe_vformat
 
 class TestEvaluator(unittest.TestCase):
     def test_fstring_access(self):
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(ValueError):
             evaluate("(lambda x: f'{x.__class__}')(1)")
 
     def test_fstrings(self):
@@ -22,7 +22,7 @@ class TestEvaluator(unittest.TestCase):
 
 class TestFormatter(unittest.TestCase):
     def test_format_access(self):
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(ValueError):
             s = safe_vformat("{x.__class__}", [], {"x": object})
 
 

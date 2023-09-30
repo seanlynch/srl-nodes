@@ -1,19 +1,35 @@
 """Evaluate Python expressions safely."""
 
 import ast
+import inspect
 from operator import getitem
 import re
 import string
 from typing import Any, Generator, Optional, Sequence
 
 
-SAFE_BUILTINS = [
-    "abs",
-    "divmod",
-    "int",
-    "float",
-    "str",
-]
+def safe_vformat(fmt: str, args: Sequence = [], kwargs: dict = {}) -> str:
+    return FORMATTER.vformat(fmt, args, kwargs)
+
+
+def safe_format(fmt: str, *args, **kwargs) -> str:
+    return safe_vformat(fmt, args, kwargs)
+
+
+GLOBAL_SYMBOLS = {
+    "abs": abs,
+    "bytes": bytes,
+    "divmod": divmod,
+    "format": format,
+    "float": float,
+    "int": int,
+    "safe_format": safe_format,
+    "safe_vformat": safe_vformat,
+    "str": str,
+}
+
+
+SAFE_FUNCTIONS = set(GLOBAL_SYMBOLS.values())
 
 
 class EvalCtx:
@@ -35,40 +51,72 @@ class EvalCtx:
         return self.__class__(symbols, self)
 
 
+GLOBAL_CTX = EvalCtx(GLOBAL_SYMBOLS)
+
+
 class Lambda:
     def __init__(self, args: ast.arguments, body: ast.AST, evaluator: "Evaluator", ctx: EvalCtx):
-        assert not args.posonlyargs
-        assert not args.kwonlyargs
-        self.args = args.args
+        num_non_defaults = len(args.posonlyargs) + len(args.args) - len(args.defaults)
+        defaults = {}
+        for a, d in zip((args.posonlyargs + args.args)[num_non_defaults:], args.defaults):
+            defaults[a.arg] = evaluator.evaluate(d, ctx)
+
+        for a, d in zip(args.kwonlyargs, args.kw_defaults):
+            if d is not None:
+                defaults[a.arg] = evaluator.evaluate(d, ctx)
+
+        parameters = []
+        for a in args.posonlyargs:
+            p = inspect.Parameter(
+                a.arg,
+                inspect.Parameter.POSITIONAL_ONLY,
+                default=defaults.get(a.arg, inspect.Parameter.empty),
+            )
+            parameters.append(p)
+
+        for a in args.args:
+            p = inspect.Parameter(
+                a.arg,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=defaults.get(a.arg, inspect.Parameter.empty),
+            )
+            parameters.append(p)
+
+        if args.vararg is not None:
+            parameters.append(inspect.Parameter(
+                args.vararg.arg,
+                inspect.Parameter.VAR_POSITIONAL,
+            ))
+
+        for a in args.kwonlyargs:
+            p = inspect.Parameter(
+                a.arg,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=defaults.get(a.arg, inspect.Parameter.empty),
+            )
+            parameters.append(p)
+
+        if args.kwarg is not None:
+            parameters.append(inspect.Parameter(
+                args.kwarg.arg,
+                inspect.Parameter.VAR_KEYWORD,
+            ))
+
+        self.signature = inspect.Signature(parameters)
         self.body = body
         self.evaluator = evaluator
         self.ctx = ctx
         self.defaults = [evaluator.evaluate(d, ctx) for d in args.defaults]
 
     def __call__(self, *args, **kwargs):
-        symbols = {arg.arg: v for arg, v in zip(self.args, args)}
-        rest = self.args[len(args):]
-        for i, arg in enumerate(rest, len(self.defaults) - len(rest)):
-            if arg.arg in kwargs:
-                symbols[arg.arg] = kwargs[arg.arg]
-                del kwargs[arg.arg]
-            elif i < 0:
-                symbols[arg.arg] = self.defaults[i]
-            else:
-                raise TypeError(f"Failed to provide argument for {arg.arg}")
-
-        ctx = self.ctx.push_symbols(symbols)
+        ba = self.signature.bind(*args, **kwargs)
+        ba.apply_defaults()
+        ctx = self.ctx.push_symbols(ba.arguments)
         return self.evaluator.evaluate(self.body, ctx)
 
 
 class Evaluator:
-    # String format conversion numbers
-    CONV = {
-        -1: "",
-        115: "!s",
-        114: "!r",
-        97: "!a",
-    }
+    """Evaluate an expression in a restricted subset of Python by walking the AST."""
 
     def comprehend(self, generators: list[ast.comprehension], ctx: EvalCtx) -> Generator[EvalCtx, None, None]:
         comp = generators[0]
@@ -160,6 +208,11 @@ class Evaluator:
 
     def eval_Call(self, node: ast.Call, ctx: EvalCtx) -> Any:
         func = self.evaluate(node.func, ctx)
+        # Only allow calling of Lambdas and functions that are known to be safe
+        # TODO need to support methods as well
+        if not isinstance(func, Lambda) and func not in SAFE_FUNCTIONS:
+            raise ValueError(f"Not allowed to call {func!r}")
+
         args = [self.evaluate(arg, ctx) for arg in node.args]
         kwargs = {}
         for kw in node.keywords:
@@ -292,11 +345,14 @@ def evaluate(expr: str, symbols: dict[str, Any] = {}) -> Any:
     node = ast.parse(expr, mode="eval")
     assert isinstance(node, ast.Expression)
     evaluator = Evaluator()
-    return evaluator.evaluate(node, EvalCtx(symbols))
+    return evaluator.evaluate(node, EvalCtx(symbols, GLOBAL_CTX))
 
 
-def safe_getattr(obj: Any, attr: str):
-    raise NotImplementedError("Attribute lookup is not yet implemented.")
+def safe_getattr(obj: Any, attr: str) -> Any:
+    if attr.startswith("_"):
+        raise ValueError(f"Not allowed to access attributes starting with underscore.")
+
+    return getattr(obj, attr)
 
 
 class SafeFormatter(string.Formatter):
@@ -318,10 +374,6 @@ class SafeFormatter(string.Formatter):
 
 
 FORMATTER = SafeFormatter()
-
-
-def safe_vformat(fmt, args: Sequence = [], kwargs: dict = {}) -> str:
-    return FORMATTER.vformat(fmt, args, kwargs)
 
 
 def main():
