@@ -1,7 +1,6 @@
-import inspect
-import textwrap
-
 import nodes
+
+from . import evaluator
 
 
 class AnyType(str):
@@ -63,7 +62,7 @@ class SrlFormatString:
 
     def doit(self, format, **kwargs):
         # Allow referencing arguments both by name and index.
-        return (format.format(*kwargs.values(), **kwargs),)
+        return (evaluator.safe_vformat(format, list(kwargs.values()), kwargs),)
 
 
 class SrlNumExpr:

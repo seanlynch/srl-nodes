@@ -2,7 +2,9 @@
 
 import ast
 from operator import getitem
-from typing import Any, Generator, Optional
+import re
+import string
+from typing import Any, Generator, Optional, Sequence
 
 
 SAFE_BUILTINS = [
@@ -100,11 +102,10 @@ class Evaluator:
 
         return meth(node, ctx)
 
-    def eval_Attribute(self, node, ctx: EvalCtx):
+    def eval_Attribute(self, node: ast.Attribute, ctx: EvalCtx):
         assert isinstance(node.ctx, ast.Load)
-
-        # Need to be very careful with this one
-        raise NotImplementedError("Attribute lookup is not yet implemented.")
+        obj = self.evaluate(node.value, ctx)
+        return safe_getattr(obj, node.attr)
 
     def eval_BinOp(self, node, ctx: EvalCtx) -> Any:
         left = self.evaluate(node.left, ctx)
@@ -217,17 +218,11 @@ class Evaluator:
 
     def eval_FormattedValue(self, node: ast.FormattedValue, ctx: EvalCtx) -> str:
         value = self.evaluate(node.value, ctx)
-        conv = self.CONV[node.conversion]
-        if node.format_spec is None:
-            format_spec = ""
-        else:
-            fmt = self.evaluate(node.format_spec, ctx)
-            format_spec = f":{fmt}"
+        if node.conversion != -1:
+            value = FORMATTER.convert_field(value, chr(node.conversion))
 
-        # Cheat and use str.format() rather than trying to reimplement
-        # formatting. We're trusting the parser to sanitize format
-        # specs here, which is probably wrong.
-        return f"{{{conv}{format_spec}}}".format(value)
+        format_spec = "" if node.format_spec is None else self.evaluate(node.format_spec, ctx)
+        return FORMATTER.format_field(value, format_spec)
 
     def eval_GeneratorExp(self, node: ast.GeneratorExp, ctx: EvalCtx):
         return (self.evaluate(node.elt, c) for c in self.comprehend(node.generators, ctx))
@@ -298,6 +293,35 @@ def evaluate(expr: str, symbols: dict[str, Any] = {}) -> Any:
     assert isinstance(node, ast.Expression)
     evaluator = Evaluator()
     return evaluator.evaluate(node, EvalCtx(symbols))
+
+
+def safe_getattr(obj: Any, attr: str):
+    raise NotImplementedError("Attribute lookup is not yet implemented.")
+
+
+class SafeFormatter(string.Formatter):
+    field_pat = re.compile(r"([^\.\]]*)\.(.+)|\[(\d+)\]")
+    def get_field(self, field_name, args, kwargs):
+        m = self.field_pat.fullmatch(field_name)
+        if m is None:
+            raise ValueError(f"Could not parse field name {field_name!r}")
+
+        key, attr, idx = m.groups()
+        value = self.get_value(key, args, kwargs)
+        if attr is not None:
+            return safe_getattr(value, attr), key
+
+        if idx is not None:
+            return getitem(value, int(idx)), key
+
+        return value, key
+
+
+FORMATTER = SafeFormatter()
+
+
+def safe_vformat(fmt, args: Sequence = [], kwargs: dict = {}) -> str:
+    return FORMATTER.vformat(fmt, args, kwargs)
 
 
 def main():
