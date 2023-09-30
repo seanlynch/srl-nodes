@@ -2,10 +2,64 @@
 
 import ast
 from operator import getitem
-from typing import Any
+from typing import Any, Generator, Optional
 
 
-class Visitor(ast.NodeVisitor):
+SAFE_BUILTINS = [
+    "abs",
+    "divmod",
+    "int",
+    "float",
+    "str",
+]
+
+
+class EvalCtx:
+    """Context for the evaluator."""
+
+    def __init__(self, symbols: dict[str, Any], parent: Optional["EvalCtx"] = None):
+        self.symbols = symbols
+        self.parent = parent
+
+    def lookup_symbol(self, name: str):
+        try:
+            return self.symbols[name]
+        except KeyError:
+            if self.parent is None:
+                raise NameError(f"name {name!r} is not defined")
+            return self.parent.lookup_symbol(name)
+
+    def push_symbols(self, symbols: dict[str, Any]):
+        return self.__class__(symbols, self)
+
+
+class Lambda:
+    def __init__(self, args: ast.arguments, body: ast.AST, evaluator: "Evaluator", ctx: EvalCtx):
+        assert not args.posonlyargs
+        assert not args.kwonlyargs
+        self.args = args.args
+        self.body = body
+        self.evaluator = evaluator
+        self.ctx = ctx
+        self.defaults = [evaluator.evaluate(d, ctx) for d in args.defaults]
+
+    def __call__(self, *args, **kwargs):
+        symbols = {arg.arg: v for arg, v in zip(self.args, args)}
+        rest = self.args[len(args):]
+        for i, arg in enumerate(rest, len(self.defaults) - len(rest)):
+            if arg.arg in kwargs:
+                symbols[arg.arg] = kwargs[arg.arg]
+                del kwargs[arg.arg]
+            elif i < 0:
+                symbols[arg.arg] = self.defaults[i]
+            else:
+                raise TypeError(f"Failed to provide argument for {arg.arg}")
+
+        ctx = self.ctx.push_symbols(symbols)
+        return self.evaluator.evaluate(self.body, ctx)
+
+
+class Evaluator:
     # String format conversion numbers
     CONV = {
         -1: "",
@@ -14,17 +68,10 @@ class Visitor(ast.NodeVisitor):
         97: "!a",
     }
 
-    def __init__(self, symbols: dict[str, Any]):
-        self.indent = 0
-        self.stack = []
-        self.symbols = symbols
-        super().__init__()
-
-    def comprehend(self, generators: list[ast.comprehension]):
-        """Set the symbol table based on the comprehensions and then yield."""
+    def comprehend(self, generators: list[ast.comprehension], ctx: EvalCtx) -> Generator[EvalCtx, None, None]:
         comp = generators[0]
         assert not comp.is_async
-        it = self.evaluate(comp.iter)
+        it = self.evaluate(comp.iter, ctx)
         t = comp.target
         for i in it:
             symbols = {}
@@ -35,301 +82,222 @@ class Visitor(ast.NodeVisitor):
                     assert isinstance(elt, ast.Name)
                     symbols[elt.id] = value
 
-            old_symbols = self.push_symbols(symbols)
+            new_ctx = ctx.push_symbols(symbols)
             for ifexp in comp.ifs:
-                if not self.evaluate(ifexp, symbols):
+                if not self.evaluate(ifexp, new_ctx):
                     break
             else:
                 if len(generators) > 1:
-                    for j in self.comprehend(generators[1:]):
+                    for j in self.comprehend(generators[1:], new_ctx):
                         yield j
                 else:
-                    yield None
+                    yield new_ctx
 
-            self.symbols = old_symbols
+    def evaluate(self, node: ast.AST, ctx: EvalCtx) -> Any:
+        meth = getattr(self, f"eval_{node.__class__.__name__}", None)
+        if meth is None:
+            raise NotImplementedError(f"Not implemented: {node!r}")
 
-    def evaluate(self, node):
-        self.visit(node)
-        return self.stack.pop()
+        return meth(node, ctx)
 
-    def eval_elts(self, elts):
-        for elt in elts:
-            self.visit(elt)
-            yield self.stack.pop()
-
-    def generate(self, node):
-        """Implement list and set comprehensions and generator expressions."""
-        for i in self.comprehend(node.generators):
-            yield self.evaluate(node.elt)
-
-    def make_lambda(self, args: ast.arguments, body: ast.AST):
-        assert not args.posonlyargs
-        assert not args.kwonlyargs
-        defaults = [self.evaluate(d) for d in args.defaults]
-        def func(*a, **kw):
-            symbols = {arg.arg: v for arg, v in zip(args.args, a)}
-            rest = args.args[len(a):]
-            for i, arg in enumerate(rest, len(defaults)-len(rest)):
-                if arg.arg in kw:
-                    symbols[arg.arg] = kw[arg.arg]
-                    del kw[arg.arg]
-                elif i < 0:
-                    symbols[arg.arg] = defaults[i]
-                else:
-                    raise ArugumentError(f"Failed to provide argument for {arg.arg}")
-
-            old_symbols = self.push_symbols(symbols)
-            print(ast.dump(body))
-            self.visit(body)
-            self.symbols = old_symbols
-            return self.stack.pop()
-
-        return func
-
-    def push_symbols(self, symbols: dict[str, Any]) -> dict[str, Any]:
-        print(f"push_symbols: {symbols!r}")
-        old_symbols = self.symbols
-        self.symbols = {**old_symbols, **symbols}
-        return old_symbols
-
-    def visit_Add(self, node):
-        self.stack[-2] += self.stack[-1]
-
-    def visit_Attribute(self, node):
-        assert isinstance(self.ctx, ast.Load)
+    def eval_Attribute(self, node, ctx: EvalCtx):
+        assert isinstance(node.ctx, ast.Load)
 
         # Need to be very careful with this one
         raise NotImplementedError("Attribute lookup is not yet implemented.")
 
-    def visit_BinOp(self, node):
-        # Visit in reverse polish order
-        self.visit(node.left)
-        self.visit(node.right)
-        self.visit(node.op)
-        # Pop the second operand off the stack so the ops don't have to
-        self.stack.pop()
+    def eval_BinOp(self, node, ctx: EvalCtx) -> Any:
+        left = self.evaluate(node.left, ctx)
+        right = self.evaluate(node.right, ctx)
+        match type(node.op):
+            case ast.Add:
+                return left + right
+            case ast.BitAnd:
+                return left & right
+            case ast.BitOr:
+                return left | right
+            case ast.BitXor:
+                return left ^ right
+            case ast.Div:
+                return left / right
+            case ast.FloorDiv:
+                return left // right
+            case ast.In:
+                return left in right
+            case ast.Is:
+                return left is right
+            case ast.IsNot:
+                return left is not right
+            case ast.LShift:
+                return left << right
+            case ast.Mod:
+                return left % right
+            case ast.NotIn:
+                return left not in right
+            case ast.Pow:
+                return left ** right
+            case _:
+                raise NotImplementedError(f"BinOp {node.op} is not supported.")
 
-    def visit_BitAnd(self, node):
-        self.stack[-2] &= self.stack[-1]
+    def eval_BoolOp(self, node: ast.BoolOp, ctx: EvalCtx) -> bool:
+        match type(node.op):
+            case ast.And:
+                for value in node.values:
+                    if not self.evaluate(value, ctx):
+                        # Short circuit evaluation means we stop as soon
+                        # as we get a false value.
+                        return False
+                return True
+            case ast.Or:
+                for value in node.values:
+                    if self.evaluate(value, ctx):
+                        # Stop as soon as we get a true value.
+                        return True
+                return False
+            case _:
+                raise NotImplementedError(f"Unimplemented boolean operation {node.op!r}")
 
-    def visit_BitOr(self, node):
-        self.stack[-2] |= self.stack[-1]
-
-    def visit_BitXor(self, node):
-        self.stack[-2] ^= self.stack[-1]
-
-    def visit_BoolOp(self, node):
-        if isinstance(node.op, ast.And):
-            for value in node.values:
-                self.visit(value)
-                if not self.stack[-1]:
-                    # Short circuit evaluation means we stop as soon
-                    # as we get a false value.
-                    break
-
-                self.stack.pop()
-            else:
-                self.stack.append(True)
-        elif isinstance(node.op, ast.Or):
-            for value in node.values:
-                self.visit(value)
-                if self.stack[-1]:
-                    # Stop as soon as we get a true value.
-                    break
-
-                self.stack.pop()
-            else:
-                self.stack.append(False)
-        else:
-            raise NotImplementedError(f"Unimplemented boolean operation {node.op!r}")
-
-    def visit_Call(self, node):
-        func = self.evaluate(node.func)
-        args = list(self.eval_elts(node.args))
+    def eval_Call(self, node: ast.Call, ctx: EvalCtx) -> Any:
+        func = self.evaluate(node.func, ctx)
+        args = [self.evaluate(arg, ctx) for arg in node.args]
         kwargs = {}
         for kw in node.keywords:
-            kwargs[kw.arg] = self.evaluate(kw.value)
+            kwargs[kw.arg] = self.evaluate(kw.value, ctx)
 
-        self.stack.append(func(*args, **kwargs))
+        return func(*args, **kwargs)
 
-    def visit_Compare(self, node):
-        self.visit(node.left)
+    def eval_Compare(self, node: ast.Compare, ctx: EvalCtx) -> bool:
+        left = self.evaluate(node.left, ctx)
         for op, c in zip(node.ops, node.comparators):
-            self.visit(c)
-            self.visit(op)
-            if not self.stack.pop(-2):
-                self.stack[-1] = False
-                break
-        else:
-            self.stack[-1] = True
+            right = self.evaluate(c, ctx)
+            match type(op):
+                case ast.Eq:
+                    res = left == right
+                case ast.Gt:
+                    res = left > right
+                case ast.GtE:
+                    res = left >= right
+                case ast.Lt:
+                    res = left < right
+                case ast.LtE:
+                    res = left <= right
+                case ast.NotEq:
+                    res = left != right
+                case _:
+                    raise NotImplementedError(f"Compare op {op!r} is not supported.")
+            if not res:
+                return False
 
-    def visit_Constant(self, node):
-        self.stack.append(node.value)
+            left = right
+        return True
 
-    def visit_Dict(self, node):
+    def eval_Constant(self, node: ast.Constant, ctx: EvalCtx) -> Any:
+        return node.value
+
+    def eval_Dict(self, node: ast.Dict, ctx: EvalCtx) -> dict:
         r = {}
         for k, v in zip(node.keys, node.values):
-            self.visit(v)
-            value = self.stack.pop()
+            value = self.evaluate(v, ctx)
             if k is None:
                 r.update(value)
             else:
-                self.visit(k)
-                r[self.stack.pop()] = value
+                key = self.evaluate(k, ctx)
+                r[key] = value
 
-        self.stack.append(r)
+        return r
 
-    def visit_DictComp(self, node):
-        r = {self.evaluate(node.key): self.evaluate(node.value) for i in self.comprehend(node.generators)}
-        self.stack.append(r)
+    def eval_DictComp(self, node: ast.DictComp, ctx: EvalCtx) -> dict:
+        return {
+            self.evaluate(node.key, c): self.evaluate(node.value, c)
+            for c in self.comprehend(node.generators, ctx)
+        }
 
-    def visit_Div(self, node):
-        self.stack[-2] /= self.stack[-1]
+    def eval_Expression(self, node: ast.Expression, ctx: EvalCtx) -> Any:
+        return self.evaluate(node.body, ctx)
 
-    def visit_Eq(self, node):
-        self.stack[-2] = self.stack[-2] == self.stack[-1]
-
-    def visit_Expression(self, node):
-        assert len(self.stack) == 0
-        self.visit(node.body)
-        print(self.stack)
-        assert len(self.stack) == 1
-
-    def visit_FloorDiv(self, node):
-        self.stack[-2] //= self.stack[-1]
-
-    def visit_FormattedValue(self, node):
-        self.visit(node.value)
-        value = self.stack.pop()
+    def eval_FormattedValue(self, node: ast.FormattedValue, ctx: EvalCtx) -> str:
+        value = self.evaluate(node.value, ctx)
         conv = self.CONV[node.conversion]
         if node.format_spec is None:
             format_spec = ""
         else:
-            self.visit(node.format_spec)
-            format_spec = f":{self.stack[-1]}"
+            fmt = self.evaluate(node.format_spec, ctx)
+            format_spec = f":{fmt}"
 
-        # Cheat and use str.format() rather than trying to reimplement formatting
-        self.stack[-1] = f"{{{conv}{format_spec}}}".format(value)
+        # Cheat and use str.format() rather than trying to reimplement
+        # formatting. We're trusting the parser to sanitize format
+        # specs here, which is probably wrong.
+        return f"{{{conv}{format_spec}}}".format(value)
 
-    def visit_GeneratorExp(self, node):
-        self.stack.append(self.generate(node))
+    def eval_GeneratorExp(self, node: ast.GeneratorExp, ctx: EvalCtx):
+        return (self.evaluate(node.elt, c) for c in self.comprehend(node.generators, ctx))
 
-    def visit_GtE(self, node):
-        self.stack[-2] = self.stack[-2] >= self.stack[-1]
-
-    def visit_Gt(self, node):
-        self.stack[-2] = self.stack[-2] > self.stack[-1]
-
-    def visit_IfExp(self, node):
-        test = self.evaluate(self.test)
+    def eval_IfExp(self, node: ast.IfExp, ctx: EvalCtx) -> Any:
+        test = self.evaluate(node.test, ctx)
         if test:
-            self.visit(self.body)
+            return self.evaluate(node.body, ctx)
         else:
-            self.visit(self.orelse)
+            return self.evaluate(node.orelse, ctx)
 
-    def visit_In(self, node):
-        self.stack[-2] = self.stack[-2] in self.stack[-1]
+    def eval_JoinedStr(self, node: ast.JoinedStr, ctx: EvalCtx) -> str:
+        return "".join(self.evaluate(v, ctx) for v in node.values)
 
-    def visit_Invert(self, node):
-        self.stack[-1] = ~self.stack[-1]
+    def eval_Lambda(self, node: ast.Lambda, ctx: EvalCtx) -> Lambda:
+        return Lambda(node.args, node.body, self, ctx)
 
-    def visit_Is(self, node):
-        self.stack[-2] = self.stack[-2] is self.stack[-1]
-
-    def visit_IsNot(self, node):
-        self.stack[-2] = self.stack[-2] is not self.stack[-1]
-
-    def visit_JoinedStr(self, node):
-        r = []
-        for value in node.values:
-            self.visit(value)
-            r.append(self.stack.pop())
-
-        self.stack.append("".join(r))
-
-    def visit_Lambda(self, node):
-        self.stack.append(self.make_lambda(node.args, node.body))
-
-    def visit_List(self, node):
+    def eval_List(self, node: ast.List, ctx: EvalCtx) -> list:
         assert isinstance(node.ctx, ast.Load)
-        self.stack.append(list(self.eval_elts(node.elts)))
+        return [self.evaluate(elt, ctx) for elt in node.elts]
 
-    def visit_ListComp(self, node):
-        self.stack.append(list(self.generate(node)))
+    def eval_ListComp(self, node: ast.ListComp, ctx: EvalCtx) -> list:
+        return [self.evaluate(node.elt, c) for c in self.comprehend(node.generators, ctx)]
 
-    def visit_LShift(self, node):
-        self.stack[-2] <<= self.stack[-1]
-
-    def visit_Lt(self, node):
-        self.stack[-2] = self.stack[-2] < self.stack[-1]
-
-    def visit_LtE(self, node):
-        self.stack[-2] = self.stack[-2] <= self.stack[-1]
-
-    def visit_Mod(self, node):
-        self.stack[-2] %= self.stack[-1]
-
-    def visit_Mult(self, node):
-        self.stack[-2] *= self.stack[-1]
-
-    def visit_Name(self, node):
+    def eval_Name(self, node: ast.Name, ctx: EvalCtx) -> Any:
         assert isinstance(node.ctx, ast.Load)
-        self.stack.append(self.symbols[node.id])
+        return ctx.lookup_symbol(node.id)
 
-    def visit_Not(self, node):
-        self.stack[-1] = not self.stack[-1]
+    def eval_Set(self, node: ast.Set, ctx: EvalCtx) -> set:
+        return set(self.evaluate(elt, ctx) for elt in node.elts)
 
-    def visit_NotEq(self, node):
-        self.stack[-2] = self.stack[-2] != self.stack[-1]
+    def eval_SetComp(self, node: ast.SetComp, ctx: EvalCtx) -> set:
+        return set(self.evaluate(node.elt, c) for c in self.comprehend(node.generators, ctx))
 
-    def visit_NotIn(self, node):
-        self.stack[-2] = self.stack[-2] not in self.stack[-1]
+    def eval_Slice(self, node: ast.Slice, ctx: EvalCtx) -> slice:
+        lower = None if node.lower is None else self.evaluate(node.lower, ctx)
+        upper = None if node.upper is None else self.evaluate(node.upper, ctx)
+        step = None if node.step is None else self.evaluate(node.step, ctx)
+        return slice(lower, upper, step)
 
-    def visit_Pow(self, node):
-        self.stack[-2] **= self.stack[-1]
+    def eval_Subscript(self, node: ast.Subscript, ctx: EvalCtx) -> slice:
+        value = self.evaluate(node.value, ctx)
+        s = self.evaluate(node.slice, ctx)
+        # TODO see if this is actually safe
+        return getitem(value, s)
 
-    def visit_RShift(self, node):
-        self.stack[-2] >>= self.stack[-1]
-
-    def visit_Set(self, node):
-        self.stack.append(set(self.eval_elts(node.elts)))
-
-    def visit_SetComp(self, node):
-        self.stack.append(set(self.generate(node)))
-
-    def visit_Slice(self, node):
-        lower = None if node.lower is None else self.evaluate(node.lower)
-        upper = None if node.upper is None else self.evaluate(node.upper)
-        step = None if node.step is None else self.evaluate(node.step)
-        self.stack.append(slice(lower, upper, step))
-
-    def visit_Subscript(self, node):
-        value = self.evaluate(node.value)
-        s = self.evaluate(node.slice)
-        self.stack.append(getitem(value, s))
-
-    def visit_Tuple(self, node):
+    def eval_Tuple(self, node: ast.Tuple, ctx: EvalCtx) -> tuple:
         assert isinstance(node.ctx, ast.Load)
-        self.stack.append(tuple(self.eval_elts(node.elts)))
+        return tuple(self.evaluate(elt, ctx) for elt in node.elts)
 
-    def visit_UAdd(self, node):
-        self.stack[-1] = +self.stack[-1]
+    def eval_UnaryOp(self, node: ast.UnaryOp, ctx: EvalCtx) -> Any:
+        v = self.evaluate(node, ctx)
+        match type(node.op):
+            case ast.Invert:
+                return ~v
+            case ast.Not:
+                return not v
+            case ast.UAdd:
+                return +v
+            case ast.USub:
+                return -v
+            case _:
+                raise NotImplementedError(f"Unary operation {node.op} is not supported.")
 
-    def visit_UnaryOp(self, node):
-        self.visit(node.operand)
-        self.visit(node.op)
 
-    def visit_USub(self, node):
-        self.stack[-1] = -self.stack[-1]
-
-    def generic_visit(self, node):
-        raise NotImplementedError(f"Not implemented: {node!r}")
-
-
-def evaluate(expr: str, variables: dict[str, Any]) -> Any:
+def evaluate(expr: str, symbols: dict[str, Any] = {}) -> Any:
     node = ast.parse(expr, mode="eval")
-    visitor = Visitor({})
-    return visitor.evaluate(node)
+    assert isinstance(node, ast.Expression)
+    evaluator = Evaluator()
+    return evaluator.evaluate(node, EvalCtx(symbols))
 
 
 def main():
