@@ -19,6 +19,10 @@ class TestEvaluator(unittest.TestCase):
         r = evaluate("(lambda x, y: x + y)(2, 3)")
         self.assertEqual(r, 5)
 
+    def test_attribute_access(self):
+        with self.assertRaises(ValueError):
+            evaluate("str.__class__")
+
 
 class TestFormatter(unittest.TestCase):
     def test_format_access(self):
