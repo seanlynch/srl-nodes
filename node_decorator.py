@@ -65,6 +65,8 @@ def process_annotation(a) -> tuple[str | tuple, Optional[str], bool, bool, dict[
                     settings["dynamicPrompts"] = True
                 case "forceInput":
                     settings["forceInput"] = True
+                case "multiline":
+                    settings["multiline"] = True
                 case NumRange(min, max, step):
                     settings.update({
                         "min": min,
@@ -89,9 +91,8 @@ def process_annotation(a) -> tuple[str | tuple, Optional[str], bool, bool, dict[
             type_name = "FLOAT"
         elif a is str:
             type_name = "STRING"
-            # Default dynamicPrompts to False
-            if settings.get("multiline", False) and not settings.get("dynamicPrompts", True):
-                settings["dynamicPrompts"] = False
+            settings.setdefault("multiline", False)
+            settings.setdefault("dynamicPrompts", False)
         elif a is Any:
             type_name = AnyType("*")
         elif get_origin(a) is Literal:
@@ -107,9 +108,6 @@ def process_return(a) -> tuple[str, str, bool]:
 
     # No literal returns
     assert not isinstance(t, tuple)
-
-    if settings:
-        raise TypeError(f"Unsupported annotation(s) for return types in {t!r} {name!r}: {settings!r}")
 
     if optional:
         raise TypeError(f"Optional makes no sense for return types in {t!r} {name!r}")
