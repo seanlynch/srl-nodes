@@ -50,6 +50,7 @@ def process_annotation(a) -> tuple[str | tuple, Optional[str], bool, bool, dict[
             raise TypeError(f"We only support unions with NoneType, i.e. Optional")
 
         a = args[0]
+        optional = True
 
     if get_origin(a) is list:
         is_list = True
@@ -59,8 +60,6 @@ def process_annotation(a) -> tuple[str | tuple, Optional[str], bool, bool, dict[
         for arg in get_args(a)[1:]:
             print(f"arg: {arg!r}")
             match arg:
-                case "optional":
-                    optional = True
                 case "dynamicPrompts":
                     settings["dynamicPrompts"] = True
                 case "forceInput":
