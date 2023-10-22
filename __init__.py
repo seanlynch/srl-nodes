@@ -41,12 +41,12 @@ class SrlNumExpr:
     def __call__(
             self,
             expr: Annotated[str, "multiline"],
-            i0: Optional[Annotated[int, "forceInput"]],
-            i1: Optional[Annotated[int, "forceInput"]],
-            i2: Optional[Annotated[int, "forceInput"]],
-            f0: Optional[Annotated[float, "forceInput"]],
-            f1: Optional[Annotated[float, "forceInput"]],
-            f2: Optional[Annotated[float, "forceInput"]],
+            i0: Optional[Annotated[int, "forceInput"]] = None,
+            i1: Optional[Annotated[int, "forceInput"]] = None,
+            i2: Optional[Annotated[int, "forceInput"]] = None,
+            f0: Optional[Annotated[float, "forceInput"]] = None,
+            f1: Optional[Annotated[float, "forceInput"]] = None,
+            f2: Optional[Annotated[float, "forceInput"]] = None,
     ) -> tuple[bool, int, float]:
         if expr == self.last_expr:
             code = self.last_code

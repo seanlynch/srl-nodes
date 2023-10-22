@@ -120,22 +120,31 @@ def process_return(a) -> tuple[str, str, bool]:
 def node(category, name=None, input_is_list=None):
     def wrapper(func):
         nonlocal input_is_list, name
+        tuplize = False
 
         if isinstance(func, type):
             # Support callable classes
             sig = inspect.signature(func.__call__)
             d = func.__dict__.copy()
-            d["FUNCTION"] = "__call__"
             bases = func.__bases__ # Keep any existing bases
             skip_self = True
+            func = func.__call__
+            def doit1(self, *args, **kwargs):
+                r = func(self, *args, **kwargs)
+                return (r,) if tuplize else r
+            d.update({
+                "FUNCTION": "doit",
+                "doit": doit1,
+                })
         else:
-            def doit(self, *args, **kwargs):
-                func(*args, **kwargs)
+            def doit2(self, *args, **kwargs):
+                r = func(*args, **kwargs)
+                return (r,) if tuplize else r
 
             sig = inspect.signature(func)
             d = {
                 "FUNCTION": "doit",
-                "doit": doit,
+                "doit": doit2,
             }
             bases = ()
             skip_self = False
@@ -151,6 +160,7 @@ def node(category, name=None, input_is_list=None):
         if get_origin(ra) is not tuple:
             # Turn singletons into a tuple to simplify processing
             ra = tuple[ra]
+            tuplize = True
         elif get_origin(ra) is not tuple:
             raise TypeError("Return type of node must be a type or tuple of types.")
 
@@ -202,7 +212,7 @@ def node(category, name=None, input_is_list=None):
         d.update({
             "CATEGORY": category,
             "INPUT_TYPES": INPUT_TYPES,
-            "INPUT_IS_LIST": input_is_list,
+            "INPUT_IS_LIST": False if input_is_list is None else input_is_list,
             "RETURN_TYPES": return_types,
             "RETURN_NAMES": return_names,
             "OUTPUT_IS_LIST": output_is_list,
