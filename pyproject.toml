@@ -2,7 +2,7 @@
 name = "srl-nodes"
 description = "Nodes: SRL Conditional Interrupt, SRL Format String, SRL Eval, SRL Filter Image List. This is a collection of nodes I find useful. Note that at least one module allows execution of arbitrary code. Do not use any of these nodes on a system that allow untrusted users to control workflows or inputs.[w/WARNING: The custom nodes in this extension are vulnerable to **security risks** because they allow the execution of arbitrary code through the workflow]"
 version = "1.0.0"
-license = "LICENSE"
+license = "AGPLv3"
 
 [project.urls]
 Repository = "https://github.com/seanlynch/srl-nodes"
